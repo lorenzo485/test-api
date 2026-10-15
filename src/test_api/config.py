@@ -5,6 +5,7 @@ accessor. Reading os.environ at the point of use scatters defaults across the
 codebase and defers failure until the unlucky code path actually runs.
 """
 
+import os
 from functools import lru_cache
 from typing import Literal
 
