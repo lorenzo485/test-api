@@ -1,0 +1,62 @@
+name: security
+
+on:
+  pull_request:
+  push:
+    branches: [main, staging]
+  # Weekly SCA on the main branch catches CVEs published after the code
+  # was merged (deck slide 28).
+  schedule:
+    - cron: "0 6 * * 1"
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # SAST: finds insecure code patterns and hardcoded credentials.
+  # Only ERROR-severity findings fail the job; the rest are informational.
+  sast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v5
+      - name: Semgrep
+        run: semgrep scan --config auto --severity ERROR --error
+
+  # SCA: vulnerable dependencies in uv.lock. Blocks on HIGH/CRITICAL only, so
+  # the scanner stays quiet enough that nobody is tempted to disable it.
+  sca:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+  # Dependency review only makes sense on a PR: it diffs the dependencies the
+  # PR introduces against the base branch.
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/dependency-review-action@v5
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: always
