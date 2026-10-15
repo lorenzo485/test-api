@@ -1,0 +1,66 @@
+name: wif-smoke
+
+# Proves keyless auth end to end: GitHub OIDC token -> Workload Identity
+# Federation -> short-lived Google credentials -> Secret Manager. No JSON key
+# exists anywhere (deck slides 6-10). Deploying is the next harness layer.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub Environment (selects the deployer SA)
+        type: choice
+        options: [development, staging, production]
+        default: development
+  push:
+    branches: [staging]
+
+concurrency:
+  group: wif-smoke-${{ inputs.environment || 'staging' }}
+  cancel-in-progress: true
+
+# Least privilege: id-token lets the job request an OIDC token for WIF;
+# nothing else is needed.
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # The Environment name lands in the OIDC token's `environment` claim, and
+    # each deployer SA trusts only its own environment. The production run
+    # waits for the Environment's required reviewers before any token exists.
+    environment: ${{ inputs.environment || 'staging' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      # Identifiers come from GitHub vars, not secrets: a provider name and a
+      # SA email are not credentials, and the trust lives in GCP IAM.
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Show identity without keys
+        run: |
+          gcloud auth list
+          gcloud projects describe lorenz-1234 --format='value(projectId)'
+
+      # Business secrets live in Secret Manager; the action registers every
+      # value with the runner's log masker (deck slide 21).
+      - id: secrets
+        uses: google-github-actions/get-secretmanager-secrets@v2
+        with:
+          secrets: |-
+            api_key:lorenz-1234/demo-api-key
+
+      - name: Prove the secret is masked
+        env:
+          API_KEY: ${{ steps.secrets.outputs.api_key }}
+        run: |
+          echo "value in logs: ${API_KEY}"
+          echo "length: ${#API_KEY}"
