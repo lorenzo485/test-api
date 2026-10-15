@@ -4,6 +4,9 @@ on:
   pull_request:
   push:
     branches: [main, staging]
+  # deploy.yml calls this workflow as its gate, so nothing reaches Cloud Run
+  # without passing lint, typecheck and tests.
+  workflow_call:
 
 # A newer push to the same ref makes the running pipeline obsolete.
 concurrency:
