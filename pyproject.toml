@@ -12,6 +12,7 @@ dependencies = [
     "pydantic-settings>=2.7.0",
     "requests>=2.34.2",
     "uvicorn>=0.54.0",
+    "django==3.2.0",
 ]
 
 # PEP 735 dependency groups are local-only and never ship in the built wheel.
