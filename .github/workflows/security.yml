@@ -8,6 +8,9 @@ on:
   # was merged (deck slide 28).
   schedule:
     - cron: "0 6 * * 1"
+  # deploy.yml calls this workflow next to ci.yml, so a vulnerable dependency
+  # never reaches Cloud Run while its scan is still running or already red.
+  workflow_call:
 
 concurrency:
   group: security-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
