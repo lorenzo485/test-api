@@ -32,7 +32,21 @@ and its attribute condition rejects any token whose `repository_owner` is not
 - GitHub Environments `development`, `staging`, and `production`, created by
   `setup-github.sh` below. `production` must have at least one required
   reviewer: that approval is the gate in front of the production service
-  account.
+  account. Also limit `production` deployments to tags matching `v*`.
+
+## Releasing to production
+
+Cut the tag from a commit that staging already deployed (the head of a push to
+`staging`), then push it:
+
+```bash
+git switch staging && git pull
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+`release.yml` checks that the tag is semver and on `staging`, waits for the
+production approval, then deploys the staging image by digest. Nothing is
+rebuilt.
 
 ## Run
 
@@ -47,9 +61,11 @@ creating it. Defaults can be overridden with environment variables
 
 ## GitHub variables
 
-`setup-github.sh` creates the three Environments (production with the `gh`
-user, or `PROD_REVIEWER`, as required reviewer) and sets these variables. Run
-it after `setup-wif.sh`; it needs `gh` authenticated with the `repo` scope.
+`setup-github.sh` creates the three Environments (production with `GH_USER`,
+or `PROD_REVIEWER`, as required reviewer) and sets these variables. Run it
+after `setup-wif.sh`. It needs a `gh` login for `GH_USER` (default
+`lorenzo485`, a repo admin) with the `repo` scope; that account does not have
+to be the active one, the script uses its token for its own calls only.
 
 ```bash
 bash infra/gcp/setup-github.sh

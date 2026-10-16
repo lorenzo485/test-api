@@ -16,11 +16,14 @@ GITHUB_OWNER="${GITHUB_OWNER:-lorenzo485}"
 GITHUB_REPO="${GITHUB_REPO:-test-api}"
 POOL_ID="${POOL_ID:-github}"
 PROVIDER_ID="${PROVIDER_ID:-github-actions}"
-# Login that must approve production deploys; defaults to the gh user.
+# gh account with admin on the repo. gh may be logged in to several accounts
+# (e.g. a work one as active); this one is used for this script only.
+GH_USER="${GH_USER:-${GITHUB_OWNER}}"
+# Login that must approve production deploys; defaults to GH_USER.
 PROD_REVIEWER="${PROD_REVIEWER:-}"
 ENVIRONMENTS=(development staging production)
 
-readonly PROJECT_ID GITHUB_OWNER GITHUB_REPO POOL_ID PROVIDER_ID
+readonly PROJECT_ID GITHUB_OWNER GITHUB_REPO POOL_ID PROVIDER_ID GH_USER
 readonly ENVIRONMENTS
 REPO="${GITHUB_OWNER}/${GITHUB_REPO}"
 readonly REPO
@@ -37,10 +40,26 @@ require_commands() {
       exit 1
     }
   done
-  gh auth status >/dev/null 2>&1 || {
-    log_error "gh is not authenticated; run: gh auth login -s repo"
+}
+
+# Pins every gh call in this process to GH_USER via GH_TOKEN, without
+# switching the globally active gh account, then checks it is a repo admin
+# (needed to create Environments and set variables).
+use_gh_account() {
+  local token is_admin
+  token="$(gh auth token --user "${GH_USER}" 2>/dev/null)" || {
+    log_error "gh has no login for ${GH_USER}; add it with:" \
+      "gh auth login -s repo (then gh auth switch back if needed)"
     exit 1
   }
+  export GH_TOKEN="${token}"
+  is_admin="$(gh api "repos/${REPO}" --jq .permissions.admin 2>/dev/null)" \
+    || is_admin="false"
+  if [[ "${is_admin}" != "true" ]]; then
+    log_error "${GH_USER} is not an admin of ${REPO}"
+    exit 1
+  fi
+  log_info "using gh account ${GH_USER}"
 }
 
 # Creates or updates one Environment. Production gets a required reviewer:
@@ -62,6 +81,7 @@ EOF
 main() {
   local project_number provider reviewer reviewer_id env
   require_commands
+  use_gh_account
 
   project_number="$(gcloud projects describe "${PROJECT_ID}" \
     --format='value(projectNumber)')"
@@ -72,7 +92,7 @@ main() {
   provider="projects/${project_number}/locations/global"
   provider+="/workloadIdentityPools/${POOL_ID}/providers/${PROVIDER_ID}"
 
-  reviewer="${PROD_REVIEWER:-$(gh api user --jq .login)}"
+  reviewer="${PROD_REVIEWER:-${GH_USER}}"
   reviewer_id="$(gh api "users/${reviewer}" --jq .id)"
   log_info "production reviewer: ${reviewer}"
 
