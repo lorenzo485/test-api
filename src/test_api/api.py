@@ -5,6 +5,7 @@ Cloud Run probes the container over HTTP, so liveness and readiness are split:
 loaded. A bad configuration then fails readiness instead of restarting forever.
 """
 
+from importlib.metadata import version
 from typing import Any
 
 from fastapi import FastAPI
@@ -46,3 +47,13 @@ def ready() -> dict[str, str]:
         Ready status plus the configured environment.
     """
     return {"status": "ready", "environment": get_settings().environment}
+
+
+@app.get("/version")
+def get_version() -> dict[str, str]:
+    """Report the installed package version.
+
+    Returns:
+        The version from the package metadata.
+    """
+    return {"version": version("test-api")}

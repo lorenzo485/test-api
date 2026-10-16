@@ -2,6 +2,7 @@
 
 import pathlib
 from collections.abc import Iterator
+from importlib.metadata import version
 
 import pytest
 from fastapi.testclient import TestClient
@@ -41,3 +42,9 @@ def test_root_greets_with_environment(client: TestClient) -> None:
     body = response.json()
     assert body["environment"] == "staging"
     assert body["service"] == "test-api"
+
+
+def test_version_reports_package_version(client: TestClient) -> None:
+    response = client.get("/version")
+    assert response.status_code == 200
+    assert response.json() == {"version": version("test-api")}
