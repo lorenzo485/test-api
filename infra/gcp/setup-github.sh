@@ -1,0 +1,93 @@
+#!/bin/bash
+# -*- coding: utf-8 -*-
+# Language: Bash / Shell
+# GitHub side of the keyless auth setup: creates the development, staging,
+# and production Environments and sets the WIF_PROVIDER and DEPLOY_SA
+# variables that setup-wif.sh prints. Run it after setup-wif.sh.
+# Re-runnable: PUT and `gh variable set` overwrite. See infra/gcp/README.md.
+
+set -euo pipefail
+IFS=$'\n\t'
+
+# Configuration (override via environment variables). Must match the values
+# used for setup-wif.sh.
+PROJECT_ID="${PROJECT_ID:-lorenz-1234}"
+GITHUB_OWNER="${GITHUB_OWNER:-lorenzo485}"
+GITHUB_REPO="${GITHUB_REPO:-test-api}"
+POOL_ID="${POOL_ID:-github}"
+PROVIDER_ID="${PROVIDER_ID:-github-actions}"
+# Login that must approve production deploys; defaults to the gh user.
+PROD_REVIEWER="${PROD_REVIEWER:-}"
+ENVIRONMENTS=(development staging production)
+
+readonly PROJECT_ID GITHUB_OWNER GITHUB_REPO POOL_ID PROVIDER_ID
+readonly ENVIRONMENTS
+REPO="${GITHUB_OWNER}/${GITHUB_REPO}"
+readonly REPO
+
+log_info()  { echo "[INFO]  $(date -Iseconds) $*"; }
+log_error() { echo "[ERROR] $(date -Iseconds) $*" >&2; }
+
+# Fails early when a required CLI is missing or gh is not logged in.
+require_commands() {
+  local cmd
+  for cmd in gcloud gh; do
+    command -v "${cmd}" >/dev/null 2>&1 || {
+      log_error "required command not found: ${cmd}"
+      exit 1
+    }
+  done
+  gh auth status >/dev/null 2>&1 || {
+    log_error "gh is not authenticated; run: gh auth login -s repo"
+    exit 1
+  }
+}
+
+# Creates or updates one Environment. Production gets a required reviewer:
+# that approval is the gate in front of sa-deployer-production.
+# Args: $1 environment name, $2 reviewer user id (used for production only).
+create_environment() {
+  local env="$1" reviewer_id="$2"
+  if [[ "${env}" == "production" ]]; then
+    gh api -X PUT "repos/${REPO}/environments/${env}" --input - >/dev/null \
+      <<EOF
+{"reviewers": [{"type": "User", "id": ${reviewer_id}}]}
+EOF
+  else
+    gh api -X PUT "repos/${REPO}/environments/${env}" >/dev/null
+  fi
+  log_info "environment ${env} ready"
+}
+
+main() {
+  local project_number provider reviewer reviewer_id env
+  require_commands
+
+  project_number="$(gcloud projects describe "${PROJECT_ID}" \
+    --format='value(projectNumber)')"
+  if [[ -z "${project_number}" ]]; then
+    log_error "could not resolve project number for ${PROJECT_ID}"
+    exit 1
+  fi
+  provider="projects/${project_number}/locations/global"
+  provider+="/workloadIdentityPools/${POOL_ID}/providers/${PROVIDER_ID}"
+
+  reviewer="${PROD_REVIEWER:-$(gh api user --jq .login)}"
+  reviewer_id="$(gh api "users/${reviewer}" --jq .id)"
+  log_info "production reviewer: ${reviewer}"
+
+  for env in "${ENVIRONMENTS[@]}"; do
+    create_environment "${env}" "${reviewer_id}"
+  done
+
+  gh variable set WIF_PROVIDER --repo "${REPO}" --body "${provider}"
+  log_info "repository variable WIF_PROVIDER = ${provider}"
+  for env in "${ENVIRONMENTS[@]}"; do
+    gh variable set DEPLOY_SA --repo "${REPO}" --env "${env}" \
+      --body "sa-deployer-${env}@${PROJECT_ID}.iam.gserviceaccount.com"
+    log_info "environment ${env} variable DEPLOY_SA set"
+  done
+  log_info "done; verify with the wif-smoke workflow"
+}
+
+main "$@"

@@ -29,9 +29,10 @@ and its attribute condition rejects any token whose `repository_owner` is not
 
 - `gcloud` authenticated with rights to manage IAM, services, and secrets in
   the project, plus `openssl`.
-- GitHub Environments `development`, `staging`, and `production` exist in the
-  repository. `production` must have at least one required reviewer: that
-  approval is the gate in front of the production service account.
+- GitHub Environments `development`, `staging`, and `production`, created by
+  `setup-github.sh` below. `production` must have at least one required
+  reviewer: that approval is the gate in front of the production service
+  account.
 
 ## Run
 
@@ -46,8 +47,15 @@ creating it. Defaults can be overridden with environment variables
 
 ## GitHub variables
 
-The script prints these values and the `gh variable set` commands; it does not
-run them. They are `vars`, not secrets: they are identifiers, not credentials.
+`setup-github.sh` creates the three Environments (production with the `gh`
+user, or `PROD_REVIEWER`, as required reviewer) and sets these variables. Run
+it after `setup-wif.sh`; it needs `gh` authenticated with the `repo` scope.
+
+```bash
+bash infra/gcp/setup-github.sh
+```
+
+They are `vars`, not secrets: they are identifiers, not credentials.
 
 | Variable | Scope | Value |
 | --- | --- | --- |
