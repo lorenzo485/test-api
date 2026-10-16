@@ -29,11 +29,24 @@ jobs:
        github.event.pull_request.head.repo.full_name == github.repository)
     uses: ./.github/workflows/ci.yml
 
+  # Security gate: same trigger as ci. A called workflow cannot get more
+  # permissions than its caller grants, and dependency-review comments on
+  # the PR, so this job grants pull-requests: write.
+  security:
+    if: >-
+      github.event_name == 'push' ||
+      (startsWith(github.head_ref, 'feature/') &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    uses: ./.github/workflows/security.yml
+    permissions:
+      contents: read
+      pull-requests: write
+
   # Build once, deploy many: the image is tagged with the commit SHA and
   # pushed once. Later environments (production) promote this exact image by
   # its immutable tag; they never rebuild it, so what was tested is what runs.
   build:
-    needs: ci
+    needs: [ci, security]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # The Environment name lands in the OIDC token, and each deployer SA only
