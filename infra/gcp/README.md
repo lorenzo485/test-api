@@ -47,9 +47,11 @@ creating it. Defaults can be overridden with environment variables
 
 ## GitHub variables
 
-`setup-github.sh` creates the three Environments (production with the `gh`
-user, or `PROD_REVIEWER`, as required reviewer) and sets these variables. Run
-it after `setup-wif.sh`; it needs `gh` authenticated with the `repo` scope.
+`setup-github.sh` creates the three Environments (production with `GH_USER`,
+or `PROD_REVIEWER`, as required reviewer) and sets these variables. Run it
+after `setup-wif.sh`. It needs a `gh` login for `GH_USER` (default
+`lorenzo485`, a repo admin) with the `repo` scope; that account does not have
+to be the active one, the script uses its token for its own calls only.
 
 ```bash
 bash infra/gcp/setup-github.sh
