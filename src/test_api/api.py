@@ -35,7 +35,7 @@ def health() -> dict[str, str]:
     Returns:
         A constant OK status.
     """
-    return {"status": "ok"}
+    return {"status": 200}
 
 
 @app.get("/ready")
