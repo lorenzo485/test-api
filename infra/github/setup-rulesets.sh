@@ -3,7 +3,8 @@
 # Language: Bash / Shell
 # Protects the default branch with a repository ruleset: changes land only
 # through a pull request, and the lint, typecheck, and test jobs from
-# .github/workflows/ci.yml must pass before the merge button is enabled.
+# .github/workflows/ci.yml plus the sca and dependency-review jobs from
+# .github/workflows/security.yml must pass before the merge button is enabled.
 # Without this, CI only reports a red check; it does not block the merge.
 # Re-runnable: updates the ruleset in place when one with RULESET_NAME exists.
 
@@ -17,8 +18,8 @@ GITHUB_REPO="${GITHUB_REPO:-test-api}"
 # (e.g. a work one as active); this one is used for this script only.
 GH_USER="${GH_USER:-${GITHUB_OWNER}}"
 RULESET_NAME="${RULESET_NAME:-protect-main}"
-# Must match the job ids in .github/workflows/ci.yml.
-REQUIRED_CHECKS=(lint typecheck test)
+# Must match the job ids in .github/workflows/ci.yml and security.yml.
+REQUIRED_CHECKS=(lint typecheck test sca dependency-review)
 # App id of GitHub Actions: only Actions may report the required checks.
 GITHUB_ACTIONS_APP_ID=15368
 
@@ -108,6 +109,7 @@ main() {
       --input - >/dev/null
     log_info "ruleset ${RULESET_NAME} created"
   fi
+  local IFS=' '
   log_info "required checks on default branch: ${REQUIRED_CHECKS[*]}"
 }
 
