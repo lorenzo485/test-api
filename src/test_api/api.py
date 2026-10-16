@@ -5,6 +5,7 @@ Cloud Run probes the container over HTTP, so liveness and readiness are split:
 loaded. A bad configuration then fails readiness instead of restarting forever.
 """
 
+import os
 from typing import Any
 
 from fastapi import FastAPI
