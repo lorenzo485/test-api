@@ -2,8 +2,9 @@
 # -*- coding: utf-8 -*-
 # Language: Bash / Shell
 # One-time GCP setup for keyless GitHub Actions auth (Workload Identity
-# Federation), one deployer service account per GitHub Environment, and a
-# demo secret in Secret Manager. Re-runnable: every create is guarded by a
+# Federation), one deployer and one runtime service account per GitHub
+# Environment, the Artifact Registry repository for images, and a demo secret
+# in Secret Manager. Re-runnable: every create is guarded by a
 # describe. See infra/gcp/README.md.
 
 set -euo pipefail
@@ -17,10 +18,11 @@ GITHUB_REPO="${GITHUB_REPO:-test-api}"
 POOL_ID="${POOL_ID:-github}"
 PROVIDER_ID="${PROVIDER_ID:-github-actions}"
 SECRET_ID="${SECRET_ID:-demo-api-key}"
+AR_REPO="${AR_REPO:-test-api}"
 ENVIRONMENTS=(development staging production)
 
 readonly PROJECT_ID REGION GITHUB_OWNER GITHUB_REPO POOL_ID PROVIDER_ID
-readonly SECRET_ID ENVIRONMENTS
+readonly SECRET_ID AR_REPO ENVIRONMENTS
 
 log_info()  { echo "[INFO]  $(date -Iseconds) $*"; }
 log_error() { echo "[ERROR] $(date -Iseconds) $*" >&2; }
@@ -35,6 +37,18 @@ sa_id_for() {
 # Args: $1 environment name.
 sa_email_for() {
   echo "$(sa_id_for "$1")@${PROJECT_ID}.iam.gserviceaccount.com"
+}
+
+# Prints the Cloud Run runtime service account id for an environment.
+# Args: $1 environment name. Output: account id (no domain).
+runtime_sa_id_for() {
+  echo "sa-runtime-$1"
+}
+
+# Prints the runtime service account email for an environment.
+# Args: $1 environment name.
+runtime_sa_email_for() {
+  echo "$(runtime_sa_id_for "$1")@${PROJECT_ID}.iam.gserviceaccount.com"
 }
 
 # Fails early when a required CLI is missing.
@@ -52,11 +66,12 @@ require_commands() {
 validate_sa_ids() {
   local env id
   for env in "${ENVIRONMENTS[@]}"; do
-    id="$(sa_id_for "${env}")"
-    if (( ${#id} > 30 )); then
-      log_error "service account id too long (${#id} > 30): ${id}"
-      exit 2
-    fi
+    for id in "$(sa_id_for "${env}")" "$(runtime_sa_id_for "${env}")"; do
+      if (( ${#id} > 30 )); then
+        log_error "service account id too long (${#id} > 30): ${id}"
+        exit 2
+      fi
+    done
   done
 }
 
@@ -120,19 +135,72 @@ create_provider() {
     --attribute-condition="${condition}"
 }
 
+# Creates a service account unless it already exists.
+# Args: $1 account id, $2 display name.
+ensure_service_account() {
+  local id="$1" display_name="$2"
+  if gcloud iam service-accounts describe \
+    "${id}@${PROJECT_ID}.iam.gserviceaccount.com" \
+    --project="${PROJECT_ID}" >/dev/null 2>&1; then
+    log_info "service account ${id} already exists"
+    return
+  fi
+  log_info "creating service account ${id}"
+  gcloud iam service-accounts create "${id}" \
+    --project="${PROJECT_ID}" \
+    --display-name="${display_name}"
+}
+
+# Deployer SAs are what GitHub impersonates; runtime SAs are what the Cloud
+# Run service runs as. Keeping them apart means the running app never holds
+# deploy permissions.
 create_service_accounts() {
-  local env id
+  local env
   for env in "${ENVIRONMENTS[@]}"; do
-    id="$(sa_id_for "${env}")"
-    if gcloud iam service-accounts describe "$(sa_email_for "${env}")" \
-      --project="${PROJECT_ID}" >/dev/null 2>&1; then
-      log_info "service account ${id} already exists"
-      continue
-    fi
-    log_info "creating service account ${id}"
-    gcloud iam service-accounts create "${id}" \
+    ensure_service_account "$(sa_id_for "${env}")" "GitHub deployer (${env})"
+    ensure_service_account "$(runtime_sa_id_for "${env}")" \
+      "Cloud Run runtime (${env})"
+  done
+}
+
+# One regional Docker repository holds the images for every environment: the
+# same sha-tagged image is promoted, never rebuilt per environment.
+create_artifact_registry() {
+  if gcloud artifacts repositories describe "${AR_REPO}" \
+    --project="${PROJECT_ID}" --location="${REGION}" >/dev/null 2>&1; then
+    log_info "artifact registry repository ${AR_REPO} already exists"
+    return
+  fi
+  log_info "creating artifact registry repository ${AR_REPO}"
+  gcloud artifacts repositories create "${AR_REPO}" \
+    --project="${PROJECT_ID}" --location="${REGION}" \
+    --repository-format=docker \
+    --description="test-api container images"
+}
+
+# Least privilege for each deployer: run.admin to replace services, writer on
+# this one repository only (not project-wide), and actAs on its own runtime SA
+# only, so the development deployer cannot launch a service as the
+# production identity.
+grant_deployer_roles() {
+  local env deployer
+  for env in "${ENVIRONMENTS[@]}"; do
+    deployer="serviceAccount:$(sa_email_for "${env}")"
+    log_info "granting deploy roles to $(sa_id_for "${env}")"
+    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+      --role="roles/run.admin" \
+      --member="${deployer}" \
+      --condition=None >/dev/null
+    gcloud artifacts repositories add-iam-policy-binding "${AR_REPO}" \
+      --project="${PROJECT_ID}" --location="${REGION}" \
+      --role="roles/artifactregistry.writer" \
+      --member="${deployer}" >/dev/null
+    gcloud iam service-accounts add-iam-policy-binding \
+      "$(runtime_sa_email_for "${env}")" \
       --project="${PROJECT_ID}" \
-      --display-name="GitHub deployer (${env})"
+      --role="roles/iam.serviceAccountUser" \
+      --member="${deployer}" \
+      --condition=None >/dev/null
   done
 }
 
@@ -224,6 +292,8 @@ main() {
   create_provider
   create_service_accounts
   bind_workload_identity "${project_number}"
+  create_artifact_registry
+  grant_deployer_roles
   create_secret
   print_github_vars "${project_number}"
 }

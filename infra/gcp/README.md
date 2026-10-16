@@ -12,7 +12,12 @@ JSON key, using Workload Identity Federation (WIF).
 | Workload identity pool | `github` | Trust container for external identities |
 | OIDC provider | `github-actions` | Trusts `https://token.actions.githubusercontent.com`, only for `lorenzo485/test-api` |
 | Service accounts | `sa-deployer-development`, `sa-deployer-staging`, `sa-deployer-production` | One deployer per GitHub Environment |
-| IAM binding | `roles/iam.workloadIdentityUser` on each SA | Only its own `attribute.environment/<env>` can impersonate it |
+| Service accounts | `sa-runtime-development`, `sa-runtime-staging`, `sa-runtime-production` | Identity each Cloud Run service runs as |
+| IAM binding | `roles/iam.workloadIdentityUser` on each deployer SA | Only its own `attribute.environment/<env>` can impersonate it |
+| Artifact Registry | Docker repository `test-api` in `us-east1` | Images tagged with the commit SHA, shared by every environment |
+| IAM binding | `roles/run.admin` (project) on each deployer SA | Lets the pipeline run `gcloud run services replace` |
+| IAM binding | `roles/artifactregistry.writer` on the `test-api` repository only | Push images, nothing else in Artifact Registry |
+| IAM binding | `roles/iam.serviceAccountUser` on `sa-runtime-<env>` only | Each deployer can deploy as its own runtime SA, never another environment's |
 | Secret | `demo-api-key` (random value) | Demo business secret; `secretAccessor` granted to the three SAs on the secret only |
 
 The provider maps `google.subject`, `attribute.repository`,
@@ -37,7 +42,7 @@ bash infra/gcp/setup-wif.sh
 The script is re-runnable: it checks each resource with `describe` before
 creating it. Defaults can be overridden with environment variables
 (`PROJECT_ID`, `REGION`, `GITHUB_OWNER`, `GITHUB_REPO`, `POOL_ID`,
-`PROVIDER_ID`, `SECRET_ID`). IAM changes can take 2-7 minutes to propagate.
+`PROVIDER_ID`, `SECRET_ID`, `AR_REPO`). IAM changes can take 2-7 minutes to propagate.
 
 ## GitHub variables
 
@@ -66,3 +71,22 @@ the deployment target instead of the git ref. GitHub only puts
 `production` Environment, which in turn waits for its required reviewers. The
 production SA is therefore reachable only after a human approval, whatever
 branch or tag triggered the run.
+
+## Deployer vs runtime identity
+
+The deployer SA is what GitHub Actions impersonates; the runtime SA is what
+the Cloud Run service runs as (`serviceAccountName` in
+`deploy/cloudrun/service-<env>.yaml`). They are kept apart so the running app
+never holds deploy permissions. `roles/iam.serviceAccountUser` is granted on
+the runtime SA itself, not the project, so `sa-deployer-development` cannot
+deploy a service that runs as `sa-runtime-production`.
+
+The services are private: no `allUsers` invoker binding is created. To call
+one during the demo, use an identity token:
+
+```bash
+URL="$(gcloud run services describe test-api-staging --region=us-east1 \
+  --format='value(status.url)')"
+curl -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
+  "${URL}/ready"
+```

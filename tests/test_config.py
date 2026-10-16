@@ -51,3 +51,10 @@ def test_invalid_value_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_settings_accessor_is_cached() -> None:
     assert get_settings() is get_settings()
+
+
+def test_development_environment_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    assert Settings().environment == "development"

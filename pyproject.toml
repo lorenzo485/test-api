@@ -11,6 +11,7 @@ dependencies = [
     "fastapi>=0.143.1",
     "pydantic-settings>=2.7.0",
     "requests>=2.34.2",
+    "uvicorn>=0.54.0",
 ]
 
 # PEP 735 dependency groups are local-only and never ship in the built wheel.
@@ -22,6 +23,7 @@ dev = [
     "pytest-cov>=6.0.0",
     "pyright>=1.1.390",
     "ruff>=0.16.5",
+    "httpx2>=2.13.1",
 ]
 
 [project.scripts]

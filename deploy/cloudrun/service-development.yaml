@@ -1,0 +1,46 @@
+# GitOps: this file is the source of truth for the development Cloud Run service.
+# The pipeline applies it with `gcloud run services replace`, so any change
+# made by hand in the console is overwritten on the next deploy.
+# IMAGE is replaced by the pipeline with the immutable, sha-tagged image.
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: test-api-development
+  labels:
+    environment: development
+  annotations:
+    # Private by default: no allUsers invoker binding is declared anywhere.
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        # A small ceiling caps cost and blast radius for the demo.
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "2"
+    spec:
+      # Runtime identity is separate from the deployer identity: the app gets
+      # only what it needs at runtime, never the deploy permissions.
+      serviceAccountName: sa-runtime-development@lorenz-1234.iam.gserviceaccount.com
+      containerConcurrency: 80
+      timeoutSeconds: 30
+      containers:
+        - image: IMAGE
+          ports:
+            - name: http1
+              containerPort: 8080
+          env:
+            - name: ENVIRONMENT
+              value: development
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          startupProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
