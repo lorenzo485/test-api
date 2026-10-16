@@ -1,6 +1,18 @@
 # test-api
 
-TODO: describe this project.
+Reference repository for CI/CD best practices. A minimal FastAPI service on
+Cloud Run (`/`, `/health`, `/ready`) whose real subject is the pipeline around
+it: quality and security gates, keyless GCP auth, and a branch-driven
+promotion path.
+
+| Trigger                    | Result                                          |
+| -------------------------- | ----------------------------------------------- |
+| Pull request               | `ci` + `security` gates; deploy to development  |
+| Merge into `staging`       | Build image and deploy to staging               |
+| Tag `v*` (from `staging`)  | Promote the staging image to production         |
+
+Authentication uses GitHub OIDC with Workload Identity Federation, so no
+service account keys exist. GCP and GitHub setup scripts live in `infra/`.
 
 ## Setup
 
