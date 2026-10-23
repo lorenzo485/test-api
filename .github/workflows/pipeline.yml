@@ -1,17 +1,18 @@
 name: pipeline
 
 # Trunk-based: every push to main is checked and, if green, deployed to the
-# only environment, production.
+# only environment, production. A manual run from another branch only checks.
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
-# One run at a time, never cancelled: cancelling a run also kills its deploy
-# job, and an interrupted `services replace` leaves the service in an unknown
-# state. Pushes made meanwhile collapse into a single queued run of the latest.
+# One run at a time across all refs, never cancelled: every run targets the
+# same production service, cancelling a run also kills its deploy job, and an
+# interrupted `services replace` leaves the service in an unknown state.
+# Pushes made meanwhile collapse into a single queued run of the latest.
 concurrency:
-  group: pipeline-${{ github.ref_name }}
+  group: pipeline-production
   cancel-in-progress: false
 
 # Least privilege: only the deploy job gets id-token.
@@ -91,6 +92,9 @@ jobs:
   # The image is tagged with the commit SHA, so what was checked is what runs.
   deploy:
     needs: [lint, typecheck, test, sast, sca]
+    # Only main reaches production; the Environment's branch policy enforces
+    # the same rule on GitHub's side (infra/gcp/setup-github.sh).
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # The Environment name lands in the OIDC token, and the deployer SA only

@@ -67,7 +67,9 @@ They are `vars`, not secrets: they are identifiers, not credentials.
 | `WIF_PROVIDER` | repository | `projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/github/providers/github-actions` |
 | `DEPLOY_SA` | environment `production` | `sa-deployer-production@lorenz-1234.iam.gserviceaccount.com` |
 
-Verify by running the `pipeline` workflow (`workflow_dispatch`).
+Verify by running the `pipeline` workflow (`workflow_dispatch`) on `main`.
+This is a real deploy: it builds the image and replaces the production Cloud
+Run service. Run from any other branch, it only runs the checks.
 
 ## Why bind on `attribute.environment`, not `ref`
 

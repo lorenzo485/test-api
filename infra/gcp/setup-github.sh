@@ -61,13 +61,21 @@ use_gh_account() {
 }
 
 # Creates or updates one Environment. The empty reviewers list also clears a
-# reviewer left over from an earlier setup.
+# reviewer left over from an earlier setup. Only main may deploy to it, so no
+# other branch can get an OIDC token for the deployer SA.
 # Args: $1 environment name.
 create_environment() {
   local env="$1"
   gh api -X PUT "repos/${REPO}/environments/${env}" --input - >/dev/null \
-    <<<'{"reviewers": []}'
-  log_info "environment ${env} ready"
+    <<<'{"reviewers": [], "deployment_branch_policy":
+         {"protected_branches": false, "custom_branch_policies": true}}'
+  if [[ "$(gh api "repos/${REPO}/environments/${env}/deployment-branch-policies" \
+      --jq 'any(.branch_policies[]; .name == "main")')" != "true" ]]; then
+    gh api -X POST \
+      "repos/${REPO}/environments/${env}/deployment-branch-policies" \
+      -f name=main -f type=branch >/dev/null
+  fi
+  log_info "environment ${env} ready (deploys from main only)"
 }
 
 main() {
