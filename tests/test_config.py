@@ -14,7 +14,7 @@ def _isolated_environment(
 ) -> None:
     """Give each test an empty environment and a directory with no `.env`."""
     monkeypatch.chdir(tmp_path)
-    for key in ("ENVIRONMENT", "LOG_LEVEL"):
+    for key in ("ENVIRONMENT", "LOG_LEVEL", "SLOW_RATE", "SLOW_MS", "ERROR_RATE"):
         monkeypatch.delenv(key, raising=False)
     get_settings.cache_clear()
 
@@ -58,3 +58,11 @@ def test_development_environment_is_accepted(
 ) -> None:
     monkeypatch.setenv("ENVIRONMENT", "development")
     assert Settings().environment == "development"
+
+
+def test_fault_rate_above_one_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SLOW_RATE", "1.5")
+    with pytest.raises(ValidationError):
+        Settings()

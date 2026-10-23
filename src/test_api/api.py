@@ -5,10 +5,12 @@ Cloud Run probes the container over HTTP, so liveness and readiness are split:
 loaded. A bad configuration then fails readiness instead of restarting forever.
 """
 
+import random
+import time
 from importlib.metadata import version
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 from test_api.config import get_settings
 
@@ -51,11 +53,22 @@ def ready() -> dict[str, str]:
 
 @app.get("/checkout")
 def checkout() -> dict[str, str]:
-    """Confirm a checkout.
+    """Confirm a checkout, degraded on purpose by the fault-injection knobs.
+
+    `ERROR_RATE` fails a share of requests with 500 (availability SLI) and
+    `SLOW_RATE` delays a share by `SLOW_MS` (latency SLI).
 
     Returns:
         A success message.
+
+    Raises:
+        HTTPException: 500 for the injected share of failed requests.
     """
+    settings = get_settings()
+    if random.random() < settings.error_rate:
+        raise HTTPException(status_code=500, detail="checkout failed")
+    if random.random() < settings.slow_rate:
+        time.sleep(settings.slow_ms / 1000)
     return {"message": "checkout exitoso"}
 
 
