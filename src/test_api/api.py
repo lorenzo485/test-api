@@ -67,3 +67,13 @@ def get_version() -> dict[str, str]:
         The version from the package metadata.
     """
     return {"version": version("test-api")}
+
+
+@app.get("/test")
+def test_function() -> dict[str, str]:
+    """Test funcion, this does nothing.
+
+    Returns:
+        anything really, does not matter.
+    """
+    return {"message": "hola papito lindo, esta es la funcion de test"}
