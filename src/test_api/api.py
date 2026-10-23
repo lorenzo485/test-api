@@ -35,11 +35,16 @@ async def access_log(
         The downstream response, unchanged.
     """
     start = time.perf_counter()
-    status = 500  # an unhandled exception still counts against availability
+    # 499 = client closed the request: a cancellation (e.g. a load generator
+    # timeout during a latency incident) must not burn the availability budget.
+    status = 499
     try:
         response = await call_next(request)
         status = response.status_code
         return response
+    except Exception:
+        status = 500  # an unhandled exception still counts against availability
+        raise
     finally:
         logger.log(
             logging.ERROR if status >= 500 else logging.INFO,

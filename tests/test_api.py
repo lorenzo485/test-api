@@ -96,3 +96,20 @@ def test_access_log_records_checkout_failure(
     assert fields["path"] == "/checkout"
     assert fields["status"] == 500
     assert fields["latency_ms"] >= 0
+
+
+def test_access_log_records_checkout_success(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    logger = logging.getLogger("test_api.api")
+    logger.addHandler(caplog.handler)
+    try:
+        client.get("/checkout")
+    finally:
+        logger.removeHandler(caplog.handler)
+    (record,) = caplog.records
+    assert record.levelname == "INFO"
+    fields = record.fields  # type: ignore[attr-defined]
+    assert fields["path"] == "/checkout"
+    assert fields["status"] == 200
+    assert fields["latency_ms"] >= 0
