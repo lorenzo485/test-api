@@ -2,14 +2,13 @@
 
 Reference repository for CI/CD best practices. A minimal FastAPI service on
 Cloud Run (`/`, `/health`, `/ready`) whose real subject is the pipeline around
-it: quality and security gates, keyless GCP auth, and a branch-driven
-promotion path.
+it: quality and security gates, keyless GCP auth, and a single trunk-based
+deploy.
 
-| Trigger                    | Result                                          |
-| -------------------------- | ----------------------------------------------- |
-| Pull request               | `ci` + `security` gates; deploy to development  |
-| Merge into `staging`       | Build image and deploy to staging               |
-| Tag `v*` (from `staging`)  | Promote the staging image to production         |
+A push to `main` runs `.github/workflows/pipeline.yml`: lint, typecheck,
+tests, SAST (Semgrep), and SCA (Trivy) in parallel. When all five pass, one
+job builds the SHA-tagged image and deploys it to Cloud Run in the only
+environment, `production`.
 
 Authentication uses GitHub OIDC with Workload Identity Federation, so no
 service account keys exist. GCP and GitHub setup scripts live in `infra/`.

@@ -1,11 +1,11 @@
 #!/bin/bash
 # -*- coding: utf-8 -*-
 # Language: Bash / Shell
-# Protects the default branch with a repository ruleset: changes land only
-# through a pull request, and the lint, typecheck, and test jobs from
-# .github/workflows/ci.yml plus the sca and dependency-review jobs from
-# .github/workflows/security.yml must pass before the merge button is enabled.
-# Without this, CI only reports a red check; it does not block the merge.
+# Protects the default branch with a repository ruleset that still allows
+# direct pushes: it only blocks deleting main and force-pushing over its
+# history. The gate is .github/workflows/pipeline.yml, which deploys only when
+# every check passes. There is no pull_request or required_status_checks
+# rule: either one would reject a direct push.
 # Re-runnable: updates the ruleset in place when one with RULESET_NAME exists.
 
 set -euo pipefail
@@ -18,13 +18,8 @@ GITHUB_REPO="${GITHUB_REPO:-test-api}"
 # (e.g. a work one as active); this one is used for this script only.
 GH_USER="${GH_USER:-${GITHUB_OWNER}}"
 RULESET_NAME="${RULESET_NAME:-protect-main}"
-# Must match the job ids in .github/workflows/ci.yml and security.yml.
-REQUIRED_CHECKS=(lint typecheck test sca dependency-review)
-# App id of GitHub Actions: only Actions may report the required checks.
-GITHUB_ACTIONS_APP_ID=15368
 
-readonly GITHUB_OWNER GITHUB_REPO GH_USER RULESET_NAME REQUIRED_CHECKS
-readonly GITHUB_ACTIONS_APP_ID
+readonly GITHUB_OWNER GITHUB_REPO GH_USER RULESET_NAME
 REPO="${GITHUB_OWNER}/${GITHUB_REPO}"
 readonly REPO
 
@@ -62,32 +57,17 @@ use_gh_account() {
   log_info "using gh account ${GH_USER}"
 }
 
-# Prints the ruleset JSON body. Zero approvals because a solo maintainer
-# cannot approve their own PR; the PR rule still forbids direct pushes.
+# Prints the ruleset JSON body. PUT replaces the rule list, so re-running this
+# also drops the pull_request and required_status_checks rules set earlier.
 ruleset_body() {
-  local checks
-  checks="$(printf '%s\n' "${REQUIRED_CHECKS[@]}" \
-    | jq -R --argjson app "${GITHUB_ACTIONS_APP_ID}" \
-      '{context: ., integration_id: $app}' | jq -s .)"
-  jq -n --arg name "${RULESET_NAME}" --argjson checks "${checks}" '{
+  jq -n --arg name "${RULESET_NAME}" '{
     name: $name,
     target: "branch",
     enforcement: "active",
     conditions: {ref_name: {include: ["~DEFAULT_BRANCH"], exclude: []}},
     rules: [
       {type: "deletion"},
-      {type: "non_fast_forward"},
-      {type: "pull_request", parameters: {
-        required_approving_review_count: 0,
-        dismiss_stale_reviews_on_push: false,
-        require_code_owner_review: false,
-        require_last_push_approval: false,
-        required_review_thread_resolution: false
-      }},
-      {type: "required_status_checks", parameters: {
-        strict_required_status_checks_policy: false,
-        required_status_checks: $checks
-      }}
+      {type: "non_fast_forward"}
     ]
   }'
 }
@@ -109,8 +89,8 @@ main() {
       --input - >/dev/null
     log_info "ruleset ${RULESET_NAME} created"
   fi
-  local IFS=' '
-  log_info "required checks on default branch: ${REQUIRED_CHECKS[*]}"
+  log_info "default branch: direct pushes allowed;" \
+    "deletion and force-push blocked"
 }
 
 main "$@"

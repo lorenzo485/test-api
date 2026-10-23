@@ -19,12 +19,12 @@ POOL_ID="${POOL_ID:-github}"
 PROVIDER_ID="${PROVIDER_ID:-github-actions}"
 SECRET_ID="${SECRET_ID:-demo-api-key}"
 AR_REPO="${AR_REPO:-test-api}"
-ENVIRONMENTS=(development staging production)
+ENVIRONMENTS=(production)
 
 readonly PROJECT_ID REGION GITHUB_OWNER GITHUB_REPO POOL_ID PROVIDER_ID
 readonly SECRET_ID AR_REPO ENVIRONMENTS
 
-log_info()  { echo "[INFO]  $(date -Iseconds) $*"; }
+log_info() { echo "[INFO]  $(date -Iseconds) $*"; }
 log_error() { echo "[ERROR] $(date -Iseconds) $*" >&2; }
 
 # Prints the deployer service account id for an environment.
@@ -67,7 +67,7 @@ validate_sa_ids() {
   local env id
   for env in "${ENVIRONMENTS[@]}"; do
     for id in "$(sa_id_for "${env}")" "$(runtime_sa_id_for "${env}")"; do
-      if (( ${#id} > 30 )); then
+      if ((${#id} > 30)); then
         log_error "service account id too long (${#id} > 30): ${id}"
         exit 2
       fi
@@ -163,8 +163,8 @@ create_service_accounts() {
   done
 }
 
-# One regional Docker repository holds the images for every environment: the
-# same sha-tagged image is promoted, never rebuilt per environment.
+# One regional Docker repository holds the sha-tagged images the pipeline
+# builds and deploys.
 create_artifact_registry() {
   if gcloud artifacts repositories describe "${AR_REPO}" \
     --project="${PROJECT_ID}" --location="${REGION}" >/dev/null 2>&1; then
@@ -180,8 +180,7 @@ create_artifact_registry() {
 
 # Least privilege for each deployer: run.admin to replace services, writer on
 # this one repository only (not project-wide), and actAs on its own runtime SA
-# only, so the development deployer cannot launch a service as the
-# production identity.
+# only, so a deployer cannot launch a service as any other identity.
 grant_deployer_roles() {
   local env deployer
   for env in "${ENVIRONMENTS[@]}"; do
@@ -204,11 +203,10 @@ grant_deployer_roles() {
   done
 }
 
-# Each SA trusts ONLY jobs running in its own GitHub Environment. The deck
-# binds on attribute.ref == refs/heads/main, which breaks staging-branch and
-# tag deploys; binding on the environment instead means the production SA is
-# reachable only after the production Environment's required reviewers
-# approve. Uses the project NUMBER, never a wildcard pool.
+# Each SA trusts ONLY jobs running in its own GitHub Environment, so the
+# production SA is reachable only from a job that declares
+# `environment: production`, not from any workflow in the repo. Uses the
+# project NUMBER, never a wildcard pool.
 # Args: $1 project number.
 bind_workload_identity() {
   local project_number="$1"

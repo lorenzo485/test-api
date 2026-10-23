@@ -1,8 +1,8 @@
 # GitOps: this file is the source of truth for the production Cloud Run service.
 # The pipeline applies it with `gcloud run services replace`, so any change
 # made by hand in the console is overwritten on the next deploy.
-# IMAGE is replaced by the release pipeline with the digest of the image that
-# staging already ran: production never gets a rebuilt image.
+# IMAGE is replaced by .github/workflows/pipeline.yml with the SHA-tagged
+# image it just built from the checked commit.
 apiVersion: serving.knative.dev/v1
 kind: Service
 metadata:
