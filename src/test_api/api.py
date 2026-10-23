@@ -50,8 +50,15 @@ def ready() -> dict[str, str]:
 
 
 @app.get("/checkout")
-def checkout():
+def checkout() -> dict[str, str]:
+    """Confirm a checkout.
+
+    Returns:
+        A success message.
+    """
     return {"message": "checkout exitoso"}
+
+
 @app.get("/version")
 def get_version() -> dict[str, str]:
     """Report the installed package version.
