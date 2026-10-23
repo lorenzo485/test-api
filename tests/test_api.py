@@ -1,5 +1,6 @@
 """Tests for the HTTP endpoints."""
 
+import logging
 import pathlib
 from collections.abc import Iterator
 from importlib.metadata import version
@@ -74,3 +75,24 @@ def test_checkout_sleeps_slow_ms_when_slow_rate_is_one(
     get_settings.cache_clear()
     assert client.get("/checkout").status_code == 200
     assert sleeps == [1.5]
+
+
+def test_access_log_records_checkout_failure(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    logger = logging.getLogger("test_api.api")
+    logger.addHandler(caplog.handler)
+    monkeypatch.setenv("ERROR_RATE", "1")
+    get_settings.cache_clear()
+    try:
+        client.get("/checkout")
+    finally:
+        logger.removeHandler(caplog.handler)
+    (record,) = caplog.records
+    assert record.levelname == "ERROR"
+    fields = record.fields  # type: ignore[attr-defined]
+    assert fields["path"] == "/checkout"
+    assert fields["status"] == 500
+    assert fields["latency_ms"] >= 0

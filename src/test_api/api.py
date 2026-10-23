@@ -5,16 +5,54 @@ Cloud Run probes the container over HTTP, so liveness and readiness are split:
 loaded. A bad configuration then fails readiness instead of restarting forever.
 """
 
+import logging
 import random
 import time
+from collections.abc import Awaitable, Callable
 from importlib.metadata import version
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 
 from test_api.config import get_settings
+from test_api.logs import get_logger
 
 app = FastAPI(title="test-api")
+logger = get_logger(__name__)
+
+
+@app.middleware("http")
+async def access_log(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    """Emit one structured log line per request, the source of the SLIs.
+
+    Args:
+        request: The incoming request.
+        call_next: The rest of the middleware chain.
+
+    Returns:
+        The downstream response, unchanged.
+    """
+    start = time.perf_counter()
+    status = 500  # an unhandled exception still counts against availability
+    try:
+        response = await call_next(request)
+        status = response.status_code
+        return response
+    finally:
+        logger.log(
+            logging.ERROR if status >= 500 else logging.INFO,
+            "request completed",
+            extra={
+                "fields": {
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status": status,
+                    "latency_ms": round((time.perf_counter() - start) * 1000, 1),
+                }
+            },
+        )
 
 
 @app.get("/")
