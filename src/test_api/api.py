@@ -46,3 +46,8 @@ def ready() -> dict[str, str]:
         Ready status plus the configured environment.
     """
     return {"status": "ready", "environment": get_settings().environment}
+
+
+@app.get("/checkout")
+def checkout():
+    return {"message": "checkout exitoso"}
