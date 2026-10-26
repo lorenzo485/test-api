@@ -14,7 +14,18 @@ def _isolated_environment(
 ) -> None:
     """Give each test an empty environment and a directory with no `.env`."""
     monkeypatch.chdir(tmp_path)
-    for key in ("ENVIRONMENT", "LOG_LEVEL", "SLOW_RATE", "SLOW_MS", "ERROR_RATE"):
+    for key in (
+        "ENVIRONMENT",
+        "LOG_LEVEL",
+        "SLOW_RATE",
+        "SLOW_MS",
+        "ERROR_RATE",
+        "DEMO_API_KEY",
+        "REQUIRE_DEMO_API_KEY",
+        "LEGACY_URL",
+        "WARMUP_S",
+        "WARMUP_MODE",
+    ):
         monkeypatch.delenv(key, raising=False)
     get_settings.cache_clear()
 
@@ -66,3 +77,28 @@ def test_fault_rate_above_one_is_rejected(
     monkeypatch.setenv("SLOW_RATE", "1.5")
     with pytest.raises(ValidationError):
         Settings()
+
+
+def test_production_without_flag_does_not_require_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    assert Settings().demo_api_key.get_secret_value() == ""
+
+
+def test_required_api_key_missing_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("REQUIRE_DEMO_API_KEY", "true")
+    with pytest.raises(ValidationError, match="DEMO_API_KEY is required"):
+        Settings()
+
+
+def test_required_api_key_is_never_rendered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("REQUIRE_DEMO_API_KEY", "true")
+    monkeypatch.setenv("DEMO_API_KEY", "s3cr3t-value")
+    settings = Settings()
+    assert settings.demo_api_key.get_secret_value() == "s3cr3t-value"
+    assert "s3cr3t-value" not in repr(settings)

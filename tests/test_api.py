@@ -1,14 +1,17 @@
 """Tests for the HTTP endpoints."""
 
+import http.server
 import logging
 import pathlib
+import threading
 from collections.abc import Iterator
 from importlib.metadata import version
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
-from test_api.api import app
+from test_api.api import _warm, app
 from test_api.config import get_settings
 
 
@@ -113,3 +116,96 @@ def test_access_log_records_checkout_success(
     assert fields["path"] == "/checkout"
     assert fields["status"] == 200
     assert fields["latency_ms"] >= 0
+
+
+def test_startup_fails_when_required_secret_is_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("REQUIRE_DEMO_API_KEY", "true")
+    get_settings.cache_clear()
+    with pytest.raises(ValidationError), TestClient(app):
+        pass
+    get_settings.cache_clear()
+
+
+def test_blocking_warmup_runs_before_the_app_serves(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    sleeps: list[float] = []
+    monkeypatch.setattr("test_api.api.time.sleep", sleeps.append)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("WARMUP_S", "300")
+    monkeypatch.setenv("WARMUP_MODE", "blocking")
+    get_settings.cache_clear()
+    with TestClient(app) as test_client:
+        assert sleeps == [300.0]
+        assert test_client.get("/ready").status_code == 200
+    get_settings.cache_clear()
+
+
+def test_background_warmup_keeps_health_up_and_ready_down(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    gate = threading.Event()
+    monkeypatch.setattr("test_api.api.time.sleep", lambda _s: gate.wait(5))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("WARMUP_S", "300")
+    get_settings.cache_clear()
+    with TestClient(app) as test_client:
+        assert test_client.get("/health").status_code == 200
+        assert test_client.get("/ready").status_code == 503
+        gate.set()
+        assert _warm.wait(5)
+        assert test_client.get("/ready").status_code == 200
+    get_settings.cache_clear()
+
+
+def test_legacy_is_off_without_url(client: TestClient) -> None:
+    response = client.get("/legacy")
+    assert response.status_code == 503
+    assert response.json() == {"error": "legacy backend not configured"}
+
+
+def test_legacy_returns_backend_body(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"hello from on-prem")
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setenv("LEGACY_URL", f"http://127.0.0.1:{server.server_port}/")
+        get_settings.cache_clear()
+        response = client.get("/legacy")
+    finally:
+        server.shutdown()
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "legacy": "hello from on-prem"}
+
+
+def test_legacy_degrades_and_logs_when_backend_is_down(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Port 9 (discard) is closed locally, so the connection is refused fast.
+    monkeypatch.setenv("LEGACY_URL", "http://127.0.0.1:9/")
+    get_settings.cache_clear()
+    logger = logging.getLogger("test_api.api")
+    logger.addHandler(caplog.handler)
+    try:
+        response = client.get("/legacy")
+    finally:
+        logger.removeHandler(caplog.handler)
+    assert response.status_code == 503
+    assert response.json() == {"error": "legacy backend unavailable"}
+    error = next(r for r in caplog.records if r.message == "legacy backend unavailable")
+    assert error.fields["legacy_url"] == "http://127.0.0.1:9/"  # type: ignore[attr-defined]
