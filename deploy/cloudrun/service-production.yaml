@@ -40,6 +40,9 @@ spec:
           env:
             - name: ENVIRONMENT
               value: production
+            # Resolved by the private Cloud DNS zone gtd.corp in the VPC.
+            - name: LEGACY_URL
+              value: http://bd-clientes.gtd.corp/
           resources:
             limits:
               cpu: "1"
