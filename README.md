@@ -38,6 +38,8 @@ uv run pyright         # type check
 Off by default; the session III lab (`scripts/lab-produccion.md`) flips them.
 The SLO lab knobs (`SLOW_RATE`, `SLOW_MS`, `ERROR_RATE`) are in
 `scripts/chaos-commands.md`.
+Opening the service URL in a browser shows the lab's live dashboard, fed by
+`GET /lab/status`; `curl /` still returns JSON.
 
 | Variable | Effect |
 |---|---|

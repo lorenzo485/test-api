@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from test_api import api
 from test_api.api import _warm, app
 from test_api.config import get_settings
 
@@ -46,6 +47,91 @@ def test_root_greets_with_environment(client: TestClient) -> None:
     body = response.json()
     assert body["environment"] == "staging"
     assert body["service"] == "test-api"
+
+
+def test_root_serves_dashboard_to_browsers(client: TestClient) -> None:
+    response = client.get("/", headers={"Accept": "text/html,*/*"})
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "/lab/status" in response.text
+
+
+@pytest.fixture
+def lab(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    """The staging client with the metadata server stubbed out."""
+    monkeypatch.setattr(api, "_region", lambda: "southamerica-west1")
+    return client
+
+
+def test_lab_status_shape(lab: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("K_REVISION", "test-api-00042-abc")
+    body = lab.get("/lab/status").json()
+    assert body == {
+        "service": "test-api",
+        "revision": "test-api-00042-abc",
+        "environment": "staging",
+        "region": "southamerica-west1",
+        "region_ok": True,
+        "legacy": "not_configured",
+        "secret": False,
+        "warmup": {"done": True, "progress": 1.0},
+        "user": None,
+    }
+
+
+def test_lab_status_reports_secret_without_leaking_it(
+    lab: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DEMO_API_KEY", "s3cr3t-value")
+    get_settings.cache_clear()
+    response = lab.get("/lab/status")
+    assert response.json()["secret"] is True
+    assert "s3cr3t-value" not in response.text
+
+
+def test_lab_status_strips_iap_prefix(lab: TestClient) -> None:
+    response = lab.get(
+        "/lab/status",
+        headers={"x-goog-authenticated-user-email": "accounts.google.com:ana@gtd.cl"},
+    )
+    assert response.json()["user"] == "ana@gtd.cl"
+
+
+def test_lab_status_reports_warmup_progress(
+    lab: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WARMUP_S", "100")
+    get_settings.cache_clear()
+    monkeypatch.setattr(api, "_warm_started", 0.0)
+    monkeypatch.setattr("test_api.api.time.monotonic", lambda: 25.0)
+    _warm.clear()
+    try:
+        warmup = lab.get("/lab/status").json()["warmup"]
+    finally:
+        _warm.set()
+    assert warmup == {"done": False, "progress": 0.25}
+
+
+def test_lab_status_reports_unreachable_legacy(
+    lab: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LEGACY_URL", "http://127.0.0.1:9/")
+    get_settings.cache_clear()
+    assert lab.get("/lab/status").json()["legacy"] == "unreachable"
+
+
+def test_region_is_unknown_when_metadata_is_unreachable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise OSError("no metadata server")
+
+    monkeypatch.setattr("test_api.api.urllib.request.urlopen", refuse)
+    api._region.cache_clear()
+    try:
+        assert api._region() == "unknown"
+    finally:
+        api._region.cache_clear()
 
 
 def test_version_reports_package_version(client: TestClient) -> None:

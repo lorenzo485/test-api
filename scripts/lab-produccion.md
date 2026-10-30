@@ -29,6 +29,19 @@ Variables de la app usadas en el lab (todas apagadas por defecto):
 | `WARMUP_S` | Segundos de conexión simulada a sistemas legacy lentos |
 | `WARMUP_MODE` | `blocking`: calienta antes de abrir `$PORT`. `background`: abre el puerto y `/ready` responde 503 hasta terminar |
 
+## Tablero en vivo
+
+Abra la URL del servicio en el navegador para ver el tablero: un semáforo en
+español, pensado para la audiencia de gerencia, con un veredicto general
+("Listo para clientes" / "Aún no está listo") y cinco controles. Cada paso del
+lab pasa una luz de rojo a verde, y el encabezado "Versión en producción"
+cambia (y se resalta unos segundos) al hacer el rollback del paso 12.
+
+- `curl` a `/` sigue devolviendo JSON; el tablero solo se sirve a navegadores.
+- `GET /lab/status` es el JSON detrás del tablero (nunca expone el valor del secreto).
+- Para verlo, el instructor se otorga `roles/run.invoker` con su cuenta del lab
+  o, desde el paso 11, acceso por IAP.
+
 ## 00:00–00:10 · Escenario (pasos 01–02)
 
 ### 01 · test-api tal como corre en el sandbox

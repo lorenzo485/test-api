@@ -6,8 +6,10 @@ no crash loop, so a bad configuration fails the new revision and traffic
 stays on the previous one.
 """
 
+import functools
 import http.client
 import logging
+import os
 import random
 import threading
 import time
@@ -18,17 +20,27 @@ from importlib.metadata import version
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from test_api.config import get_settings
+from test_api.dashboard import DASHBOARD_HTML
 from test_api.logs import get_logger
 
 logger = get_logger(__name__)
 _warm = threading.Event()
+_warm_started = 0.0  # monotonic start of the last warmup, for /lab/status
+# The Org Policy of the production lab only allows this region.
+EXPECTED_REGION = "southamerica-west1"
+_HTTP_ERRORS = (OSError, ValueError, http.client.HTTPException)
+_METADATA_REGION_URL = (
+    "http://metadata.google.internal/computeMetadata/v1/instance/region"
+)
 
 
 def _warm_up(seconds: float) -> None:
     """Stand in for synchronous connections to slow legacy systems."""
+    global _warm_started
+    _warm_started = time.monotonic()
     time.sleep(seconds)
     _warm.set()
 
@@ -94,13 +106,20 @@ async def access_log(
         )
 
 
-@app.get("/")
-def root() -> dict[str, Any]:
+@app.get("/", response_model=None)
+def root(request: Request) -> dict[str, Any] | HTMLResponse:
     """Return a greeting that shows which environment answered.
 
+    Browsers get the live lab dashboard; curl and other clients keep JSON.
+
+    Args:
+        request: The incoming request, read for its Accept header.
+
     Returns:
-        Service name, greeting, and the configured environment.
+        The dashboard page, or service name, greeting, and environment.
     """
+    if "text/html" in request.headers.get("accept", ""):
+        return HTMLResponse(DASHBOARD_HTML)
     return {
         "service": "test-api",
         "message": "Hello from Cloud Run",
@@ -149,9 +168,8 @@ def legacy() -> dict[str, str] | JSONResponse:
     try:
         # A short timeout: a hung on-prem system must not hold the request
         # until Cloud Run's 30 s timeout.
-        with urllib.request.urlopen(url, timeout=2) as response:
-            body = response.read(200).decode("utf-8", errors="replace")
-    except (OSError, ValueError, http.client.HTTPException) as error:
+        body = _call_legacy(url, timeout=2)
+    except _HTTP_ERRORS as error:
         logger.error(
             "legacy backend unavailable",
             extra={"fields": {"legacy_url": url, "error": repr(error)}},
@@ -160,6 +178,87 @@ def legacy() -> dict[str, str] | JSONResponse:
             status_code=503, content={"error": "legacy backend unavailable"}
         )
     return {"status": "ok", "legacy": body}
+
+
+def _call_legacy(url: str, timeout: float) -> str:
+    """Fetch the first bytes of the on-prem backend.
+
+    Args:
+        url: The backend URL.
+        timeout: Seconds to wait before giving up.
+
+    Returns:
+        Up to 200 bytes of the response body, decoded.
+
+    Raises:
+        OSError: The backend is unreachable or timed out.
+        ValueError: The URL is malformed.
+        http.client.HTTPException: The backend spoke broken HTTP.
+    """
+    with urllib.request.urlopen(url, timeout=timeout) as response:
+        return response.read(200).decode("utf-8", errors="replace")
+
+
+@functools.cache
+def _region() -> str:
+    """Return the Cloud Run region from the metadata server, read once.
+
+    Returns:
+        The region name, or "unknown" outside Google Cloud.
+    """
+    request = urllib.request.Request(
+        _METADATA_REGION_URL, headers={"Metadata-Flavor": "Google"}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=1) as response:
+            # The answer is projects/<number>/regions/<region>.
+            return response.read().decode().rsplit("/", 1)[-1] or "unknown"
+    except _HTTP_ERRORS:
+        return "unknown"
+
+
+@app.get("/lab/status")
+def lab_status(request: Request) -> dict[str, Any]:
+    """Report each production-lab check for the live dashboard.
+
+    Polled every 2 s, so it never logs failures and uses short timeouts.
+
+    Args:
+        request: The incoming request, read for the IAP identity header.
+
+    Returns:
+        Revision, region, on-prem reachability, secret presence (never its
+        value), warmup progress, and the IAP user.
+    """
+    settings = get_settings()
+    region = _region()
+    if not settings.legacy_url:
+        legacy = "not_configured"
+    else:
+        try:
+            _call_legacy(settings.legacy_url, timeout=1)
+            legacy = "reachable"
+        except _HTTP_ERRORS:
+            legacy = "unreachable"
+    done = _warm.is_set() or not settings.warmup_s
+    progress = (
+        1.0
+        if done
+        else min((time.monotonic() - _warm_started) / settings.warmup_s, 1.0)
+    )
+    # Display only: the header is trustworthy only behind IAP.
+    user = request.headers.get("x-goog-authenticated-user-email")
+    return {
+        "service": os.environ.get("K_SERVICE", "test-api"),
+        "revision": os.environ.get("K_REVISION", "local"),
+        "environment": settings.environment,
+        "region": region,
+        "region_ok": region == EXPECTED_REGION,
+        "legacy": legacy,
+        "secret": bool(settings.demo_api_key.get_secret_value()),
+        "warmup": {"done": done, "progress": round(progress, 3)},
+        "user": user.removeprefix("accounts.google.com:") if user else None,
+    }
 
 
 @app.get("/checkout")
