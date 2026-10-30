@@ -7,7 +7,7 @@ detail stays small and grey for the instructor.
 """
 
 DASHBOARD_HTML = """<!doctype html>
-<html lang="es">
+<html lang="es" translate="no">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -33,13 +33,13 @@ DASHBOARD_HTML = """<!doctype html>
   #version.changed { background:#5a4a12; }
   #version .label { color:var(--muted); font-size:1.1rem; }
   #revision { font:700 clamp(1.6rem,4vw,2.8rem) ui-monospace, monospace;
-    word-break:break-all; }
+    overflow-wrap:anywhere; }
   #version-note { color:var(--amber); font-weight:700; min-height:1.6rem; }
   #hello { font-size:1.4rem; color:var(--muted); }
   .grid { display:grid; gap:1.25rem;
-    grid-template-columns:repeat(auto-fit,minmax(18rem,1fr)); }
+    grid-template-columns:repeat(auto-fit,minmax(min(100%,30rem),1fr)); }
   .card { background:var(--card); border-radius:1rem; padding:1.5rem;
-    display:flex; gap:1.25rem; align-items:flex-start; }
+    min-width:0; display:flex; gap:1.25rem; align-items:flex-start; }
   .card > div:last-child { flex:1; min-width:0; }
   .dot { flex:none; width:3.5rem; height:3.5rem; border-radius:50%;
     background:var(--grey); transition:background .6s, box-shadow .6s; }
@@ -47,10 +47,10 @@ DASHBOARD_HTML = """<!doctype html>
   .dot.red { background:var(--red); box-shadow:0 0 1.5rem var(--red); }
   .dot.amber { background:var(--amber); box-shadow:0 0 1.5rem var(--amber); }
   .card h2 { margin:0 0 .4rem; font-size:1.4rem; }
-  .answer { font-size:1.5rem; font-weight:700; }
+  .answer { font-size:1.5rem; font-weight:700; overflow-wrap:anywhere; }
   .why { color:var(--fg); opacity:.8; font-size:1.05rem; margin-top:.4rem; }
   .tech { color:var(--muted); font:.85rem ui-monospace, monospace;
-    margin-top:.5rem; word-break:break-all; }
+    margin-top:.5rem; overflow-wrap:anywhere; }
   .bar { height:.7rem; background:#30363d; border-radius:.35rem; margin-top:.5rem; }
   .bar div { height:100%; width:0; background:var(--amber); border-radius:.35rem;
     transition:width .6s; }
@@ -133,7 +133,8 @@ async function poll() {
     const pct = Math.round(s.warmup.progress * 100);
     const greens = [
       light("region", s.region_ok ? "green" : "red",
-        s.region_ok ? "Sí, en Santiago" : "No, fuera de la región autorizada",
+        s.region_ok ? "Sí, en " + s.region
+          : "No, fuera de la región autorizada (" + s.expected_region + ")",
         s.region),
       light("legacy", ...LEGACY[s.legacy]),
       light("secret", s.secret ? "green" : "red",

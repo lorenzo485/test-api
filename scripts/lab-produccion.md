@@ -28,6 +28,7 @@ Variables de la app usadas en el lab (todas apagadas por defecto):
 | `LEGACY_URL` | Backend privado que llama `GET /legacy` (timeout 2 s, 503 amigable si falla) |
 | `WARMUP_S` | Segundos de conexión simulada a sistemas legacy lentos |
 | `WARMUP_MODE` | `blocking`: calienta antes de abrir `$PORT`. `background`: abre el puerto y `/ready` responde 503 hasta terminar |
+| `EXPECTED_REGION` | Región que permite la política de la organización en el proyecto (por defecto `us-east1`); el tablero la compara con la región real |
 
 ## Tablero en vivo
 
@@ -39,6 +40,9 @@ cambia (y se resalta unos segundos) al hacer el rollback del paso 12.
 
 - `curl` a `/` sigue devolviendo JSON; el tablero solo se sirve a navegadores.
 - `GET /lab/status` es el JSON detrás del tablero (nunca expone el valor del secreto).
+- Defina `EXPECTED_REGION` (por defecto `us-east1`) con la región que permite
+  la política de la organización en el proyecto productivo; si no coincide,
+  la luz de región queda en rojo.
 - Para verlo, el instructor se otorga `roles/run.invoker` con su cuenta del lab
   o, desde el paso 11, acceso por IAP.
 
