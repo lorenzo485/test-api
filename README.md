@@ -33,6 +33,19 @@ uv run ruff format .   # format
 uv run pyright         # type check
 ```
 
+## Lab knobs
+
+Off by default; the session III lab (`scripts/lab-produccion.md`) flips them.
+The SLO lab knobs (`SLOW_RATE`, `SLOW_MS`, `ERROR_RATE`) are in
+`scripts/chaos-commands.md`.
+
+| Variable | Effect |
+|---|---|
+| `REQUIRE_DEMO_API_KEY` | `true` makes an empty `DEMO_API_KEY` abort startup |
+| `LEGACY_URL` | Private backend called by `GET /legacy` (2 s timeout, 503 on failure) |
+| `WARMUP_S` | Seconds of simulated legacy connections at startup |
+| `WARMUP_MODE` | `blocking` before the port binds, or `background` behind `/ready` |
+
 ## Dependencies
 
 ```bash

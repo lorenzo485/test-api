@@ -1,24 +1,58 @@
 """HTTP surface served on Cloud Run.
 
-Cloud Run probes the container over HTTP, so liveness and readiness are split:
-`/health` only proves the process answers, `/ready` proves configuration
-loaded. A bad configuration then fails readiness instead of restarting forever.
+`/health` only proves the process answers; `/ready` proves configuration
+loaded and the warmup finished. Settings validate at startup: Cloud Run has
+no crash loop, so a bad configuration fails the new revision and traffic
+stays on the previous one.
 """
 
+import http.client
 import logging
 import random
+import threading
 import time
-from collections.abc import Awaitable, Callable
+import urllib.request
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from importlib.metadata import version
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 
 from test_api.config import get_settings
 from test_api.logs import get_logger
 
-app = FastAPI(title="test-api")
 logger = get_logger(__name__)
+_warm = threading.Event()
+
+
+def _warm_up(seconds: float) -> None:
+    """Stand in for synchronous connections to slow legacy systems."""
+    time.sleep(seconds)
+    _warm.set()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Validate settings, then warm up before or after uvicorn binds $PORT.
+
+    Uvicorn finishes lifespan startup before it binds the socket, so an
+    invalid setting exits before listening and a blocking warmup keeps the
+    port closed until the startup probe gives up.
+    """
+    _warm.clear()
+    settings = get_settings()
+    if settings.warmup_mode == "blocking" or not settings.warmup_s:
+        _warm_up(settings.warmup_s)
+    else:
+        threading.Thread(
+            target=_warm_up, args=(settings.warmup_s,), daemon=True
+        ).start()
+    yield
+
+
+app = FastAPI(title="test-api", lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -86,12 +120,46 @@ def health() -> dict[str, str]:
 
 @app.get("/ready")
 def ready() -> dict[str, str]:
-    """Report readiness once settings validate.
+    """Report readiness once settings validate and the warmup finished.
 
     Returns:
         Ready status plus the configured environment.
+
+    Raises:
+        HTTPException: 503 while the background warmup is still running.
     """
-    return {"status": "ready", "environment": get_settings().environment}
+    settings = get_settings()
+    if not _warm.is_set():
+        raise HTTPException(status_code=503, detail="warming up")
+    return {"status": "ready", "environment": settings.environment}
+
+
+@app.get("/legacy", response_model=None)
+def legacy() -> dict[str, str] | JSONResponse:
+    """Call the private on-prem backend and degrade gracefully when it fails.
+
+    Returns:
+        The backend's first bytes, or a friendly 503 when it is unreachable.
+    """
+    url = get_settings().legacy_url
+    if not url:
+        return JSONResponse(
+            status_code=503, content={"error": "legacy backend not configured"}
+        )
+    try:
+        # A short timeout: a hung on-prem system must not hold the request
+        # until Cloud Run's 30 s timeout.
+        with urllib.request.urlopen(url, timeout=2) as response:
+            body = response.read(200).decode("utf-8", errors="replace")
+    except (OSError, ValueError, http.client.HTTPException) as error:
+        logger.error(
+            "legacy backend unavailable",
+            extra={"fields": {"legacy_url": url, "error": repr(error)}},
+        )
+        return JSONResponse(
+            status_code=503, content={"error": "legacy backend unavailable"}
+        )
+    return {"status": "ok", "legacy": body}
 
 
 @app.get("/checkout")
