@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     # "blocking" runs before uvicorn binds $PORT; "background" binds first.
     warmup_s: float = Field(default=0.0, ge=0.0)
     warmup_mode: Literal["blocking", "background"] = "background"
+    # The region the org policy allows in the target project.
+    expected_region: str = "us-east1"
 
     @model_validator(mode="after")
     def _require_demo_api_key(self) -> Self:

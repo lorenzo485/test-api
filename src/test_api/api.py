@@ -29,8 +29,6 @@ from test_api.logs import get_logger
 logger = get_logger(__name__)
 _warm = threading.Event()
 _warm_started = 0.0  # monotonic start of the last warmup, for /lab/status
-# The Org Policy of the production lab only allows this region.
-EXPECTED_REGION = "southamerica-west1"
 _HTTP_ERRORS = (OSError, ValueError, http.client.HTTPException)
 _METADATA_REGION_URL = (
     "http://metadata.google.internal/computeMetadata/v1/instance/region"
@@ -200,19 +198,33 @@ def _call_legacy(url: str, timeout: float) -> str:
 
 
 @functools.cache
-def _region() -> str:
-    """Return the Cloud Run region from the metadata server, read once.
+def _fetch_region() -> str:
+    """Read the Cloud Run region from the metadata server.
 
-    Returns:
-        The region name, or "unknown" outside Google Cloud.
+    Cached, and raising on failure, so only a successful lookup sticks.
+
+    Raises:
+        OSError, ValueError, http.client.HTTPException: Metadata unreachable.
     """
     request = urllib.request.Request(
         _METADATA_REGION_URL, headers={"Metadata-Flavor": "Google"}
     )
+    with urllib.request.urlopen(request, timeout=1) as response:
+        # The answer is projects/<number>/regions/<region>.
+        region = response.read().decode().rsplit("/", 1)[-1]
+    if not region:
+        raise ValueError("empty region from metadata server")
+    return region
+
+
+def _region() -> str:
+    """Return the Cloud Run region, retrying the lookup until it succeeds.
+
+    Returns:
+        The region name, or "unknown" outside Google Cloud.
+    """
     try:
-        with urllib.request.urlopen(request, timeout=1) as response:
-            # The answer is projects/<number>/regions/<region>.
-            return response.read().decode().rsplit("/", 1)[-1] or "unknown"
+        return _fetch_region()
     except _HTTP_ERRORS:
         return "unknown"
 
@@ -253,7 +265,8 @@ def lab_status(request: Request) -> dict[str, Any]:
         "revision": os.environ.get("K_REVISION", "local"),
         "environment": settings.environment,
         "region": region,
-        "region_ok": region == EXPECTED_REGION,
+        "expected_region": settings.expected_region,
+        "region_ok": region == settings.expected_region,
         "legacy": legacy,
         "secret": bool(settings.demo_api_key.get_secret_value()),
         "warmup": {"done": done, "progress": round(progress, 3)},

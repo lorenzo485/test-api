@@ -1,6 +1,7 @@
 """Tests for the HTTP endpoints."""
 
 import http.server
+import io
 import logging
 import pathlib
 import threading
@@ -59,7 +60,7 @@ def test_root_serves_dashboard_to_browsers(client: TestClient) -> None:
 @pytest.fixture
 def lab(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     """The staging client with the metadata server stubbed out."""
-    monkeypatch.setattr(api, "_region", lambda: "southamerica-west1")
+    monkeypatch.setattr(api, "_region", lambda: "us-east1")
     return client
 
 
@@ -70,7 +71,8 @@ def test_lab_status_shape(lab: TestClient, monkeypatch: pytest.MonkeyPatch) -> N
         "service": "test-api",
         "revision": "test-api-00042-abc",
         "environment": "staging",
-        "region": "southamerica-west1",
+        "region": "us-east1",
+        "expected_region": "us-east1",
         "region_ok": True,
         "legacy": "not_configured",
         "secret": False,
@@ -120,6 +122,25 @@ def test_lab_status_reports_unreachable_legacy(
     assert lab.get("/lab/status").json()["legacy"] == "unreachable"
 
 
+def test_lab_status_flags_region_outside_expected(
+    lab: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("EXPECTED_REGION", "southamerica-west1")
+    get_settings.cache_clear()
+    body = lab.get("/lab/status").json()
+    assert body["expected_region"] == "southamerica-west1"
+    assert body["region_ok"] is False
+
+
+@pytest.fixture
+def fresh_region() -> Iterator[None]:
+    """Isolate the cached metadata lookup between tests."""
+    api._fetch_region.cache_clear()
+    yield
+    api._fetch_region.cache_clear()
+
+
+@pytest.mark.usefixtures("fresh_region")
 def test_region_is_unknown_when_metadata_is_unreachable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -127,11 +148,26 @@ def test_region_is_unknown_when_metadata_is_unreachable(
         raise OSError("no metadata server")
 
     monkeypatch.setattr("test_api.api.urllib.request.urlopen", refuse)
-    api._region.cache_clear()
-    try:
-        assert api._region() == "unknown"
-    finally:
-        api._region.cache_clear()
+    assert api._region() == "unknown"
+
+
+@pytest.mark.usefixtures("fresh_region")
+def test_region_failure_is_not_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    answers: list[Exception | bytes] = [
+        OSError("transient"),
+        b"projects/123/regions/us-east1",
+    ]
+
+    def flaky(*_args: object, **_kwargs: object) -> io.BytesIO:
+        answer = answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return io.BytesIO(answer)
+
+    monkeypatch.setattr("test_api.api.urllib.request.urlopen", flaky)
+    assert api._region() == "unknown"
+    assert api._region() == "us-east1"
+    assert api._region() == "us-east1"  # cached: no third lookup
 
 
 def test_version_reports_package_version(client: TestClient) -> None:
