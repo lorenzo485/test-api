@@ -12,6 +12,9 @@ metadata:
   annotations:
     # Private by default: no allUsers invoker binding is declared anywhere.
     run.googleapis.com/ingress: all
+    # IAP is the only access control from the internet: only the corporate
+    # group passes. Declared here so `services replace` never turns it off.
+    run.googleapis.com/iap-enabled: "true"
 spec:
   template:
     metadata:
