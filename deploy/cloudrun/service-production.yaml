@@ -12,6 +12,9 @@ metadata:
   annotations:
     # Private by default: no allUsers invoker binding is declared anywhere.
     run.googleapis.com/ingress: all
+    # IAP is the only access control from the internet: only the corporate
+    # group passes. Declared here so `services replace` never turns it off.
+    run.googleapis.com/iap-enabled: "true"
 spec:
   template:
     metadata:
@@ -19,6 +22,10 @@ spec:
         # A small ceiling caps cost and blast radius for the demo.
         autoscaling.knative.dev/minScale: "0"
         autoscaling.knative.dev/maxScale: "2"
+        # Direct VPC egress through a dedicated /26: the sandbox /27 subnets
+        # are too small for Cloud Run. Only private ranges use the VPC.
+        run.googleapis.com/network-interfaces: '[{"network":"lab-shd-vpc-sandboxia-001","subnetwork":"cloudrun-egress"}]'
+        run.googleapis.com/vpc-access-egress: private-ranges-only
     spec:
       # Runtime identity is separate from the deployer identity: the app gets
       # only what it needs at runtime, never the deploy permissions.
@@ -33,6 +40,9 @@ spec:
           env:
             - name: ENVIRONMENT
               value: production
+            # Resolved by the private Cloud DNS zone gtd.corp in the VPC.
+            - name: LEGACY_URL
+              value: http://bd-clientes.gtd.corp/
           resources:
             limits:
               cpu: "1"
